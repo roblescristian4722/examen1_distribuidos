@@ -3,8 +3,14 @@ package main
 import (
     "fmt"
     "net"
-    // "encoding/gob"
+    "encoding/gob"
 )
+
+type Petition struct {
+    Ptype int
+    Dest string
+    Msg string
+}
 
 func server() {
     s, err := net.Listen("tcp", ":9999")
@@ -23,7 +29,10 @@ func server() {
 }
 
 func handleClient(c net.Conn) {
-
+    p := &Petition{}
+    dec := gob.NewDecoder(c)
+    dec.Decode(p)
+    fmt.Println(p)
     c.Close()
 }
 
