@@ -4,7 +4,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net"
-	"strconv"
 )
 
 const (
@@ -17,14 +16,21 @@ const (
 )
 
 type Petition struct {
-    Ptype int
+    Type int
     Sender string
     Msg string
-    File []byte
 }
 
+type Connection struct {
+    Id uint
+    Type string
+    Conn net.Conn
+}
 
 func server(ps *[]Petition) {
+    id := uint(0)
+    cMsg := make(chan Connection)
+    go handleConn(cMsg, ps)
     s, err := net.Listen("tcp", ":9999")
     if err != nil {
         fmt.Println(err)
@@ -36,31 +42,62 @@ func server(ps *[]Petition) {
             fmt.Println(err)
             continue
         }
-        go handleClient(c, ps)
+        go handleClient(id, c, cMsg, ps)
+        id++
     }
 }
 
-func handleClient(c net.Conn, ps *[]Petition) {
-    p := &Petition{}
-    dec := gob.NewDecoder(c)
-    dec.Decode(p)
-    if (*p).Ptype != EXIT && (*p).Ptype != SHOW_MESSAGES {
-        *ps = append(*ps, *p)
+func handleConn(cMsg chan Connection, ps *[]Petition) {
+    active := []Connection{}
+    for {
+        select {
+        case msg := <-cMsg:
+            switch msg.Type {
+            case "kill":
+                for i, v := range active {
+                    if v.Id == msg.Id {
+                        msg.Conn.Close()
+                        active = append(active[:i], active[i + 1:]...)
+                    }
+                }
+                break
+            case "add": active = append(active, msg)
+                break
+            case "call":
+                for _, v := range active {
+                    gob.NewEncoder(v.Conn).Encode((*ps)[len(*ps) - 1])
+                }
+                break
+            }
+        }
     }
+}
 
-    if (*p).Ptype != SHOW_MESSAGES {
-        c.Close()
-    } else {
-        l, _ := strconv.ParseUint(p.Msg, 10, 64)
-        psC := (*ps)[l : ]
-        gob.NewEncoder(c).Encode(&psC)
-        c.Close()
+func handleClient(id uint, c net.Conn, cMsg chan Connection, ps *[]Petition) {
+    cMsg <- Connection{ id, "add", c }
+    for {
+        p := &Petition{}
+        err := gob.NewDecoder(c).Decode(p)
+        if err == nil {
+            switch (*p).Type {
+            case SEND_MESSAGE:
+                *ps = append(*ps, *p)
+                cMsg <- Connection{ id, "call", c }
+                break
+            case SHOW_MESSAGES:
+                gob.NewEncoder(c).Encode(ps)
+                break
+            case EXIT:
+                cMsg <- Connection{ id, "kill", c }
+                return
+            }
+        }
     }
 }
 
 func listMsg(ps *[]Petition) {
     for _, p := range *ps {
-        switch p.Ptype {
+        switch p.Type {
         case SEND_MESSAGE:
             fmt.Printf("\n>%s:\n%s\n\n", p.Sender, p.Msg)
             break

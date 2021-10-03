@@ -6,7 +6,6 @@ import (
     "bufio"
     "os"
     "encoding/gob"
-    "strconv"
 )
 
 const (
@@ -17,10 +16,9 @@ const (
 )
 
 type Petition struct {
-    Ptype int
+    Type int
     Sender string
     Msg string
-    File []byte
 }
 
 func sendMsg(c net.Conn, scanner *bufio.Scanner, username string) {
@@ -28,14 +26,14 @@ func sendMsg(c net.Conn, scanner *bufio.Scanner, username string) {
     fmt.Print("Mensaje a enviar: ")
     scanner.Scan()
     (*p).Msg = scanner.Text()
-    (*p).Ptype = SEND_MESSAGE
+    (*p).Type = SEND_MESSAGE
     (*p).Sender = username
     gob.NewEncoder(c).Encode(p)
 }
 
 func listMsg(ps *[]Petition) {
     for _, p := range *ps {
-        switch p.Ptype {
+        switch p.Type {
         case SEND_MESSAGE:
             fmt.Printf("\n>%s:\n%s\n\n", p.Sender, p.Msg)
             break
@@ -45,25 +43,25 @@ func listMsg(ps *[]Petition) {
     }
 }
 
-func showMsg(c net.Conn, ps *[]Petition) {
-    p := Petition{ Ptype: SHOW_MESSAGES, Msg: strconv.FormatUint(uint64(len(*ps)), 10) }
-    gob.NewEncoder(c).Encode(p)
-    psTmp := []Petition{}
-    gob.NewDecoder(c).Decode(&psTmp)
-    *ps = append(*ps, psTmp...)
-    c.Close()
-    listMsg(ps)
-}
-
-func client(conn chan string, username string, scanner *bufio.Scanner, ps *[]Petition) {
+func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]Petition) {
     op := -1
-    for op != EXIT {
-        c, err := net.Dial("tcp", ":9999")
-        if err != nil {
-            fmt.Println(err)
-            return
+    c, err := net.Dial("tcp", ":9999")
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+    // Primera conexión con el server: se copian todos los msg a ps
+    gob.NewEncoder(c).Encode(&Petition{ Type: SHOW_MESSAGES })
+    gob.NewDecoder(c).Decode(ps)
+    // Goroutine que obtiene nuevos mensajes de otros clientes
+    go func() {
+        for {
+            p := &Petition{}
+            err := gob.NewDecoder(c).Decode(p)
+            if err == nil { *ps = append(*ps, *p) }
         }
-
+    }()
+    for op != EXIT {
         fmt.Println("\n---------------------------------------------")
         fmt.Printf("¡Hola %s! Selecciona una opción:\n", username)
         fmt.Println(SEND_MESSAGE, ") Enviar un mensaje")
@@ -80,22 +78,21 @@ func client(conn chan string, username string, scanner *bufio.Scanner, ps *[]Pet
 
             break
         case SHOW_MESSAGES:
-            showMsg(c, ps)
+            listMsg(ps)
             break
         case EXIT:
-            c.Close()
-            conn <- "kill"
+            gob.NewEncoder(c).Encode(&Petition{})
+            conn <- c
             return
         default:
             fmt.Println("Opción no válida, vuelva a intentarlo")
         }
-        c.Close()
     }
 }
 
 func main() {
     ps := []Petition{}
-    conn := make(chan string)
+    conn := make(chan net.Conn)
     scanner := bufio.NewScanner(os.Stdin)
 
     fmt.Print("Ingrese su nombre de usuario: ")
@@ -103,7 +100,9 @@ func main() {
     username := scanner.Text()
 
     go client(conn, username, scanner, &ps)
-    <-conn
+    c := <-conn
+
+    c.Close()
     // Se termina la conexión con el servidor y la ejecución del cliente termina
 }
 
