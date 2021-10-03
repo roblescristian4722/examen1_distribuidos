@@ -6,6 +6,7 @@ import (
     "bufio"
     "os"
     "encoding/gob"
+    "strings"
 )
 
 const (
@@ -19,6 +20,7 @@ type Petition struct {
     Type int
     Sender string
     Msg string
+    File []byte
 }
 
 func sendMsg(c net.Conn, scanner *bufio.Scanner, username string) {
@@ -28,7 +30,10 @@ func sendMsg(c net.Conn, scanner *bufio.Scanner, username string) {
     (*p).Msg = scanner.Text()
     (*p).Type = SEND_MESSAGE
     (*p).Sender = username
-    gob.NewEncoder(c).Encode(p)
+    err := gob.NewEncoder(c).Encode(p)
+    if err == nil {
+        fmt.Println("Mensaje enviado con éxito")
+    } else { fmt.Println(err) }
 }
 
 func listMsg(ps *[]Petition) {
@@ -38,18 +43,65 @@ func listMsg(ps *[]Petition) {
             fmt.Printf("\n>%s:\n%s\n\n", p.Sender, p.Msg)
             break
         case SEND_FILE:
+            f := strings.Split(p.Msg, ".")
+            ext := f[len(f) - 1]
+            var t string
+            switch ext {
+            case "jpg", "jpeg", "png", "raw":
+                t = "Archivo (Imagen)"
+                break
+            case "mp4", "avi", "amv", "webm", "flv":
+                t = "Archivo (Video)";
+                break
+            case "mp3", "3gp", "flac", "m4a":
+                t = "Audio (Audio)";
+                break
+            default: t = "Archivo (" + ext + ")"
+            }
+            fmt.Printf("\n>%s:\n%s: %s\n\n", p.Sender, t, p.Msg)
             break
         }
     }
 }
 
+func sendFile(c net.Conn, scanner *bufio.Scanner, username string) {
+    fmt.Println("Archivo a enviar: ")
+    scanner.Scan()
+    path := scanner.Text()
+    file, err := os.Open(path)
+    if err != nil { fmt.Println(err); return }
+    stat, err := file.Stat()
+    if err != nil { fmt.Println(err); return }
+    bs := make([]byte, stat.Size())
+    file.Read(bs)
+    pathS := strings.Split(path, "/")
+    err = gob.NewEncoder(c).Encode(&Petition{ SEND_FILE, username, pathS[len(pathS) - 1], bs })
+    if err == nil {
+        fmt.Println("Archivo enviado con éxito")
+    } else { fmt.Println(err) }
+
+}
+
+func recieveFile(c net.Conn, username string, p *Petition) {
+    if _, err := os.Stat("client_files/"); os.IsNotExist(err) {
+        err := os.Mkdir("client_files/", 0777)
+        if err != nil { fmt.Println(err); return }
+    }
+    if _, err := os.Stat("client_files/" + username); os.IsNotExist(err) {
+        err := os.Mkdir("client_files/" + username, 0777)
+        if err != nil { fmt.Println(err); return }
+    }
+    path := "client_files/" + username + "/" + p.Msg
+    file, err := os.Create(path)
+    if err != nil { fmt.Println(err); return }
+    file.Write(p.File)
+    (*p).File = []byte{}
+}
+
 func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]Petition) {
     op := -1
     c, err := net.Dial("tcp", ":9999")
-    if err != nil {
-        fmt.Println(err)
-        return
-    }
+    if err != nil { fmt.Println(err); return }
     // Primera conexión con el server: se copian todos los msg a ps
     gob.NewEncoder(c).Encode(&Petition{ Type: SHOW_MESSAGES })
     gob.NewDecoder(c).Decode(ps)
@@ -58,7 +110,12 @@ func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]P
         for {
             p := &Petition{}
             err := gob.NewDecoder(c).Decode(p)
-            if err == nil { *ps = append(*ps, *p) }
+            if err == nil {
+                if p.Type == SEND_FILE {
+                    recieveFile(c, username, p)
+                }
+                *ps = append(*ps, *p)
+            }
         }
     }()
     for op != EXIT {
@@ -75,7 +132,7 @@ func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]P
             sendMsg(c, scanner, username)
             break
         case SEND_FILE:
-
+            sendFile(c, scanner, username)
             break
         case SHOW_MESSAGES:
             listMsg(ps)
@@ -84,8 +141,7 @@ func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]P
             gob.NewEncoder(c).Encode(&Petition{})
             conn <- c
             return
-        default:
-            fmt.Println("Opción no válida, vuelva a intentarlo")
+        default: fmt.Println("Opción no válida, vuelva a intentarlo")
         }
     }
 }
@@ -101,7 +157,6 @@ func main() {
 
     go client(conn, username, scanner, &ps)
     c := <-conn
-
     c.Close()
     // Se termina la conexión con el servidor y la ejecución del cliente termina
 }

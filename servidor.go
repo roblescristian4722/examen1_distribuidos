@@ -4,6 +4,8 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net"
+    "os"
+    "strings"
 )
 
 const (
@@ -19,6 +21,7 @@ type Petition struct {
     Type int
     Sender string
     Msg string
+    File []byte
 }
 
 type Connection struct {
@@ -32,16 +35,10 @@ func server(ps *[]Petition) {
     cMsg := make(chan Connection)
     go handleConn(cMsg, ps)
     s, err := net.Listen("tcp", ":9999")
-    if err != nil {
-        fmt.Println(err)
-        return
-    }
+    if err != nil { fmt.Println(err); return }
     for {
         c, err := s.Accept()
-        if err != nil {
-            fmt.Println(err)
-            continue
-        }
+        if err != nil { fmt.Println(err); continue}
         go handleClient(id, c, cMsg, ps)
         id++
     }
@@ -67,10 +64,23 @@ func handleConn(cMsg chan Connection, ps *[]Petition) {
                 for _, v := range active {
                     gob.NewEncoder(v.Conn).Encode((*ps)[len(*ps) - 1])
                 }
+                (*ps)[len(*ps) - 1].File = []byte{}
                 break
             }
         }
     }
+}
+
+func createFile(p *Petition) {
+    if _, err := os.Stat("server_files/"); os.IsNotExist(err) {
+        err := os.Mkdir("server_files/", 0777)
+        if err != nil { fmt.Println(err); return }
+    }
+    path := "server_files/" + (*p).Msg
+    file, err := os.Create(path)
+    if err != nil { fmt.Println(err); return }
+
+    file.Write((*p).File)
 }
 
 func handleClient(id uint, c net.Conn, cMsg chan Connection, ps *[]Petition) {
@@ -80,7 +90,10 @@ func handleClient(id uint, c net.Conn, cMsg chan Connection, ps *[]Petition) {
         err := gob.NewDecoder(c).Decode(p)
         if err == nil {
             switch (*p).Type {
-            case SEND_MESSAGE:
+            case SEND_MESSAGE, SEND_FILE:
+                if (*p).Type == SEND_FILE {
+                    createFile(p)
+                }
                 *ps = append(*ps, *p)
                 cMsg <- Connection{ id, "call", c }
                 break
@@ -102,6 +115,22 @@ func listMsg(ps *[]Petition) {
             fmt.Printf("\n>%s:\n%s\n\n", p.Sender, p.Msg)
             break
         case SEND_FILE:
+            f := strings.Split(p.Msg, ".")
+            ext := f[len(f) - 1]
+            var t string
+            switch ext {
+            case "jpg", "jpeg", "png", "raw":
+                t = "Archivo (Imagen)"
+                break
+            case "mp4", "avi", "amv", "webm", "flv":
+                t = "Archivo (Video)";
+                break
+            case "mp3", "3gp", "flac", "m4a":
+                t = "Audio (Audio)";
+                break
+            default: t = "Archivo (" + ext + ")"
+            }
+            fmt.Printf("\n>%s:\n%s: %s\n\n", p.Sender, t, p.Msg)
             break
         }
     }
