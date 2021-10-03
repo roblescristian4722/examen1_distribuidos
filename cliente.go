@@ -6,6 +6,7 @@ import (
     "bufio"
     "os"
     "encoding/gob"
+    "strconv"
 )
 
 const (
@@ -32,7 +33,29 @@ func sendMsg(c net.Conn, scanner *bufio.Scanner, username string) {
     gob.NewEncoder(c).Encode(p)
 }
 
-func client(conn chan string, username string, scanner *bufio.Scanner) {
+func listMsg(ps *[]Petition) {
+    for _, p := range *ps {
+        switch p.Ptype {
+        case SEND_MESSAGE:
+            fmt.Printf("\n>%s:\n%s\n\n", p.Sender, p.Msg)
+            break
+        case SEND_FILE:
+            break
+        }
+    }
+}
+
+func showMsg(c net.Conn, ps *[]Petition) {
+    p := Petition{ Ptype: SHOW_MESSAGES, Msg: strconv.FormatUint(uint64(len(*ps)), 10) }
+    gob.NewEncoder(c).Encode(p)
+    psTmp := []Petition{}
+    gob.NewDecoder(c).Decode(&psTmp)
+    *ps = append(*ps, psTmp...)
+    c.Close()
+    listMsg(ps)
+}
+
+func client(conn chan string, username string, scanner *bufio.Scanner, ps *[]Petition) {
     op := -1
     for op != EXIT {
         c, err := net.Dial("tcp", ":9999")
@@ -54,8 +77,10 @@ func client(conn chan string, username string, scanner *bufio.Scanner) {
             sendMsg(c, scanner, username)
             break
         case SEND_FILE:
+
             break
         case SHOW_MESSAGES:
+            showMsg(c, ps)
             break
         case EXIT:
             c.Close()
@@ -69,6 +94,7 @@ func client(conn chan string, username string, scanner *bufio.Scanner) {
 }
 
 func main() {
+    ps := []Petition{}
     conn := make(chan string)
     scanner := bufio.NewScanner(os.Stdin)
 
@@ -76,7 +102,7 @@ func main() {
     scanner.Scan()
     username := scanner.Text()
 
-    go client(conn, username, scanner)
+    go client(conn, username, scanner, &ps)
     <-conn
     // Se termina la conexión con el servidor y la ejecución del cliente termina
 }

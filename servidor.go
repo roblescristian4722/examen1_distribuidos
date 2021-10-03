@@ -1,9 +1,10 @@
 package main
 
 import (
-    "fmt"
-    "net"
-    "encoding/gob"
+	"encoding/gob"
+	"fmt"
+	"net"
+	"strconv"
 )
 
 const (
@@ -46,16 +47,22 @@ func handleClient(c net.Conn, ps *[]Petition) {
     if (*p).Ptype != EXIT && (*p).Ptype != SHOW_MESSAGES {
         *ps = append(*ps, *p)
     }
-    c.Close()
+
+    if (*p).Ptype != SHOW_MESSAGES {
+        c.Close()
+    } else {
+        l, _ := strconv.ParseUint(p.Msg, 10, 64)
+        psC := (*ps)[l : ]
+        gob.NewEncoder(c).Encode(&psC)
+        c.Close()
+    }
 }
 
 func listMsg(ps *[]Petition) {
-    fmt.Println()
     for _, p := range *ps {
         switch p.Ptype {
         case SEND_MESSAGE:
-            fmt.Printf(">%s:\n", p.Sender)
-            fmt.Printf("%s\n\n", p.Msg)
+            fmt.Printf("\n>%s:\n%s\n\n", p.Sender, p.Msg)
             break
         case SEND_FILE:
             break
