@@ -47,16 +47,10 @@ func listMsg(ps *[]Petition) {
             ext := f[len(f) - 1]
             var t string
             switch ext {
-            case "jpg", "jpeg", "png", "raw":
-                t = "Archivo (Imagen)"
-                break
-            case "mp4", "avi", "amv", "webm", "flv":
-                t = "Archivo (Video)";
-                break
-            case "mp3", "3gp", "flac", "m4a":
-                t = "Audio (Audio)";
-                break
-            default: t = "Archivo (" + ext + ")"
+                case "jpg", "jpeg", "png", "raw": t = "Archivo (Imagen)"; break
+                case "mp4", "avi", "amv", "webm", "flv": t = "Archivo (Video)"; break
+                case "mp3", "3gp", "flac", "m4a": t = "Audio (Audio)"; break
+                default: t = "Archivo (" + ext + ")"
             }
             fmt.Printf("\n>%s:\n%s: %s\n\n", p.Sender, t, p.Msg)
             break
@@ -64,18 +58,24 @@ func listMsg(ps *[]Petition) {
     }
 }
 
+func readFile(path string) []byte {
+    file, err := os.Open(path)
+    if err != nil { fmt.Println(err); return []byte{} }
+    stat, err := file.Stat()
+    if err != nil { fmt.Println(err); return []byte{} }
+    bs := make([]byte, stat.Size())
+    file.Read(bs)
+    return bs
+}
+
 func sendFile(c net.Conn, scanner *bufio.Scanner, username string) {
     fmt.Println("Archivo a enviar: ")
     scanner.Scan()
     path := scanner.Text()
-    file, err := os.Open(path)
-    if err != nil { fmt.Println(err); return }
-    stat, err := file.Stat()
-    if err != nil { fmt.Println(err); return }
-    bs := make([]byte, stat.Size())
-    file.Read(bs)
+    bs := readFile(path)
+    if len(bs) == 0 { return }
     pathS := strings.Split(path, "/")
-    err = gob.NewEncoder(c).Encode(&Petition{ SEND_FILE, username, pathS[len(pathS) - 1], bs })
+    err := gob.NewEncoder(c).Encode(&Petition{ SEND_FILE, username, pathS[len(pathS) - 1], bs })
     if err == nil {
         fmt.Println("Archivo enviado con éxito")
     } else { fmt.Println(err) }
@@ -105,6 +105,11 @@ func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]P
     // Primera conexión con el server: se copian todos los msg a ps
     gob.NewEncoder(c).Encode(&Petition{ Type: SHOW_MESSAGES })
     gob.NewDecoder(c).Decode(ps)
+    for _, v := range *ps {
+        if v.Type == SEND_FILE {
+            recieveFile(c, username, &v)
+        }
+    }
     // Goroutine que obtiene nuevos mensajes de otros clientes
     go func() {
         for {
@@ -124,8 +129,7 @@ func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]P
         fmt.Println(SEND_MESSAGE, ") Enviar un mensaje")
         fmt.Println(SEND_FILE, ") Enviar un archivo")
         fmt.Println(SHOW_MESSAGES, ") Mostrar tus mensajes")
-        fmt.Println(EXIT, ") Salir")
-        fmt.Print(">> ")
+        fmt.Println(EXIT, ") Salir\n>> ")
         fmt.Scan(&op)
         switch op {
         case SEND_MESSAGE:
@@ -158,6 +162,4 @@ func main() {
     go client(conn, username, scanner, &ps)
     c := <-conn
     c.Close()
-    // Se termina la conexión con el servidor y la ejecución del cliente termina
 }
-

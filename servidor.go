@@ -83,6 +83,16 @@ func createFile(p *Petition) {
     file.Write((*p).File)
 }
 
+func readFile(p *Petition) []byte {
+    file, err := os.Open("server_files/" + (*p).Msg)
+    if err != nil { fmt.Println(err); return []byte{} }
+    stat, err := file.Stat()
+    if err != nil { fmt.Println(err); return []byte{} }
+    bs := make([]byte, stat.Size())
+    file.Read(bs)
+    return bs
+}
+
 func handleClient(id uint, c net.Conn, cMsg chan Connection, ps *[]Petition) {
     cMsg <- Connection{ id, "add", c }
     for {
@@ -98,7 +108,14 @@ func handleClient(id uint, c net.Conn, cMsg chan Connection, ps *[]Petition) {
                 cMsg <- Connection{ id, "call", c }
                 break
             case SHOW_MESSAGES:
-                gob.NewEncoder(c).Encode(ps)
+                tmpPs := *ps
+                for i, v := range tmpPs {
+                    if v.Type == SEND_FILE {
+                        bs := readFile(&v)
+                        tmpPs[i].File = bs
+                    }
+                }
+                gob.NewEncoder(c).Encode(&tmpPs)
                 break
             case EXIT:
                 cMsg <- Connection{ id, "kill", c }
@@ -119,16 +136,10 @@ func listMsg(ps *[]Petition) {
             ext := f[len(f) - 1]
             var t string
             switch ext {
-            case "jpg", "jpeg", "png", "raw":
-                t = "Archivo (Imagen)"
-                break
-            case "mp4", "avi", "amv", "webm", "flv":
-                t = "Archivo (Video)";
-                break
-            case "mp3", "3gp", "flac", "m4a":
-                t = "Audio (Audio)";
-                break
-            default: t = "Archivo (" + ext + ")"
+                case "jpg", "jpeg", "png", "raw": t = "Archivo (Imagen)"; break
+                case "mp4", "avi", "amv", "webm", "flv": t = "Archivo (Video)"; break
+                case "mp3", "3gp", "flac", "m4a": t = "Audio (Audio)"; break
+                default: t = "Archivo (" + ext + ")"
             }
             fmt.Printf("\n>%s:\n%s: %s\n\n", p.Sender, t, p.Msg)
             break
@@ -146,8 +157,7 @@ func main() {
         fmt.Println("Seleccione una opción:")
         fmt.Println(LIST_MESSAGES, ") Mostrar mensajes/archivos recibidos")
         fmt.Println(BACKUP, ") Respaldar mensajes/archivos en un archivo")
-        fmt.Println(EXIT, ") Salir")
-        fmt.Print(">> ")
+        fmt.Println(EXIT, ") Salir\n>> ")
         fmt.Scanln(&op)
         switch op {
             case LIST_MESSAGES:
@@ -155,10 +165,8 @@ func main() {
                 break
             case BACKUP:
                 break
-            case EXIT:
-                return
-            default:
-                fmt.Println("Opción no válida, vuelva a intentarlo")
+            case EXIT: return
+            default: fmt.Println("Opción no válida, vuelva a intentarlo")
         }
     }
 }
