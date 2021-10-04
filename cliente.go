@@ -129,7 +129,7 @@ func client(conn chan net.Conn, username string, scanner *bufio.Scanner, ps *[]P
         fmt.Println(SEND_MESSAGE, ") Enviar un mensaje")
         fmt.Println(SEND_FILE, ") Enviar un archivo")
         fmt.Println(SHOW_MESSAGES, ") Mostrar tus mensajes")
-        fmt.Println(EXIT, ") Salir\n>> ")
+        fmt.Print(EXIT, " ) Salir\n>> ")
         fmt.Scan(&op)
         switch op {
         case SEND_MESSAGE:

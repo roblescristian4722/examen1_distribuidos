@@ -6,6 +6,8 @@ import (
 	"net"
     "os"
     "strings"
+    "strconv"
+    "bufio"
 )
 
 const (
@@ -58,8 +60,7 @@ func handleConn(cMsg chan Connection, ps *[]Petition) {
                     }
                 }
                 break
-            case "add": active = append(active, msg)
-                break
+            case "add": active = append(active, msg); break
             case "call":
                 for _, v := range active {
                     gob.NewEncoder(v.Conn).Encode((*ps)[len(*ps) - 1])
@@ -91,6 +92,31 @@ func readFile(p *Petition) []byte {
     bs := make([]byte, stat.Size())
     file.Read(bs)
     return bs
+}
+
+func backup(ps *[]Petition) {
+    file, err := os.OpenFile("server.backup", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+    defer file.Close()
+    if err != nil { fmt.Println("No se ha hecho un respaldo con anterioridad"); return }
+    for _, v := range *ps {
+        data := strconv.FormatInt(int64(v.Type), 10) + "|" + v.Sender + "|" + v.Msg + "\n"
+        file.WriteString(data)
+    }
+}
+
+func restore(ps *[]Petition) {
+    file, err := os.Open("server.backup")
+    if err != nil { fmt.Println(err); return }
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        line := strings.Split(scanner.Text(), "|")
+        t, _ := strconv.ParseInt(line[0], 10, 64)
+        *ps = append(*ps, Petition{
+            Type: int(t),
+            Sender: line[1],
+            Msg: line[2],
+        })
+    }
 }
 
 func handleClient(id uint, c net.Conn, cMsg chan Connection, ps *[]Petition) {
@@ -150,20 +176,21 @@ func listMsg(ps *[]Petition) {
 func main() {
     op := -1
     ps := []Petition{}
-
+    restore(&ps)
     go server(&ps)
     for op != EXIT {
         fmt.Println("\n----------------Group Chat Server-------------------")
         fmt.Println("Seleccione una opción:")
         fmt.Println(LIST_MESSAGES, ") Mostrar mensajes/archivos recibidos")
         fmt.Println(BACKUP, ") Respaldar mensajes/archivos en un archivo")
-        fmt.Println(EXIT, ") Salir\n>> ")
+        fmt.Print(EXIT, " ) Salir\n>> ")
         fmt.Scanln(&op)
         switch op {
             case LIST_MESSAGES:
                 listMsg(&ps)
                 break
             case BACKUP:
+                backup(&ps)
                 break
             case EXIT: return
             default: fmt.Println("Opción no válida, vuelva a intentarlo")
